@@ -1,0 +1,71 @@
+@startuml
+!pragma layout smetana
+!include <C4/C4_Container>
+
+LAYOUT_TOP_DOWN()
+title Маркетплейс — C4 Container\nПроектируемая архитектура; в ДЗ реализован только /health в Catalog
+
+AddRelTag("async", $lineColor="#967000", $lineStyle=DashedLine(), $legendText="Асинхронно: события через RabbitMQ")
+AddRelTag("rebuild", $lineColor="#888888", $lineStyle=DottedLine(), $legendText="Служебное восстановление проекций")
+
+Person(buyer, "Покупатель", "Выбирает товары и оплачивает заказы")
+Person(seller, "Продавец", "Публикует и редактирует свои товары")
+
+System_Boundary(marketplace, "Маркетплейс") {
+    Container(web, "Web", "TypeScript / React", "Интерфейс покупателя и продавца")
+
+    Container(users, "Users", "Python / FastAPI", "Аккаунты, роли, контакты и интересы")
+    Container(catalog, "Catalog", "Python / FastAPI", "Карточки, категории и цены товаров")
+    Container(feed, "Feed", "Python / FastAPI", "Лента с приоритетом интересующих категорий")
+    Container(orders, "Orders", "Python / FastAPI", "Оформление заказа, снимки позиций и статусы")
+    Container(payments, "Payments", "Python / FastAPI", "Расчёт суммы и учёт платежей")
+    Container(notifications, "Notifications", "Python / AMQP consumer", "Письма о статусах заказов и повторы отправки")
+
+    ContainerDb(users_db, "Users DB", "PostgreSQL", "Аккаунты, хеши паролей, роли, email, интересы")
+    ContainerDb(catalog_db, "Catalog DB", "PostgreSQL", "Товары, категории, цены, seller_id, публикация")
+    ContainerDb(feed_db, "Feed DB", "PostgreSQL", "Проекции товаров и интересов для чтения")
+    ContainerDb(orders_db, "Orders DB", "PostgreSQL", "Заказы, снимки позиций, статусы, payment_id")
+    ContainerDb(payments_db, "Payments DB", "PostgreSQL", "Суммы, валюта, попытки и транзакции")
+    ContainerDb(notifications_db, "Notifications DB", "PostgreSQL", "Шаблоны, задания, попытки доставки")
+
+    ContainerQueue(broker, "Брокер событий", "RabbitMQ", "Доставка событий как минимум один раз")
+}
+
+System_Ext(psp, "Платёжный провайдер", "Принимает оплату на своей странице")
+System_Ext(mail, "Почтовый провайдер", "Доставляет email покупателям")
+
+Rel(buyer, web, "Покупает", "HTTPS")
+Rel(seller, web, "Управляет товарами", "HTTPS")
+Rel(web, users, "Вход, профиль, интересы", "HTTPS/JSON, синхронно")
+Rel(web, catalog, "Карточки и публикация", "HTTPS/JSON, синхронно")
+Rel(web, feed, "Запрашивает ленту", "HTTPS/JSON, синхронно")
+Rel(web, orders, "Создаёт и читает заказы", "HTTPS/JSON, синхронно")
+
+Rel(orders, catalog, "Проверяет товары и цены", "HTTP/JSON, синхронно")
+Rel(orders, payments, "Создаёт и проверяет платёж", "HTTP/JSON, синхронно")
+Rel(payments, psp, "Создаёт платёж", "HTTPS API, синхронно")
+Rel(psp, payments, "Подтверждает результат", "HTTPS webhook, асинхронно")
+Rel(buyer, psp, "Оплачивает по ссылке", "HTTPS")
+Rel(notifications, users, "Получает email по user_id", "HTTP/JSON, синхронно")
+Rel(notifications, mail, "Отправляет письмо", "HTTPS API, синхронно")
+
+Rel_D(users, users_db, "Читает и пишет", "SQL")
+Rel_D(catalog, catalog_db, "Читает и пишет", "SQL")
+Rel_D(feed, feed_db, "Читает и пишет", "SQL")
+Rel_D(orders, orders_db, "Читает и пишет", "SQL")
+Rel_D(payments, payments_db, "Читает и пишет", "SQL")
+Rel_D(notifications, notifications_db, "Читает и пишет", "SQL")
+
+Rel(users, broker, "UserInterestsChanged", "AMQP", $tags="async")
+Rel(catalog, broker, "ProductChanged", "AMQP", $tags="async")
+Rel(payments, broker, "PaymentSucceeded / Failed", "AMQP", $tags="async")
+Rel(orders, broker, "OrderStatusChanged", "AMQP", $tags="async")
+Rel(broker, feed, "Товары и интересы", "AMQP", $tags="async")
+Rel(broker, orders, "Результаты оплаты", "AMQP", $tags="async")
+Rel(broker, notifications, "Статусы заказов", "AMQP", $tags="async")
+
+Rel(feed, catalog, "Восстанавливает товары", "HTTP/JSON, синхронно", $tags="rebuild")
+Rel(feed, users, "Восстанавливает интересы", "HTTP/JSON, синхронно", $tags="rebuild")
+
+SHOW_LEGEND()
+@enduml
